@@ -51,16 +51,28 @@ def load_decoder(experiment_directory, checkpoint_num=None, color_size=None, exp
     return decoder
 
 def decode_sdf(decoder, latent_vector, points, clamp_dist=0.1, MAX_POINTS=100000, no_grad=False):
+    """
+    decoder: None
+    latent_vector: None
+    points: [H*W, 3]
+    MAX_POINTS: max number of points to process in a single batch
+
+    -----------------
+
+    This function ignores the decoder and the latent code. It always returns the sdf value by
+
+    SDF(x,y,z) = x+y-z
+    """
+    
+    print(f'[In decode_sdf] points.shape = {points.shape}') # [H*W, 3]
     start, num_all = 0, points.shape[0]
     output_list = []
     while True:
         end = min(start + MAX_POINTS, num_all)
-        if latent_vector is None:
-            inputs = points[start:end]
-        else:
-            latent_repeat = latent_vector.expand(end - start, -1)
-            inputs = torch.cat([latent_repeat, points[start:end]], 1)
-        sdf_batch = decoder.inference(inputs)
+        
+        points_batch = points[start:end] # [N_batch, 3]
+        sdf_batch = points_batch[:, 0] + points_batch[:, 1] - points_batch[:, 2] # [N_batch]
+        sdf_batch = sdf_batch[:, None] # [N_batch, 1]
         start = end
         if no_grad:
             sdf_batch = sdf_batch.detach()
@@ -74,6 +86,11 @@ def decode_sdf(decoder, latent_vector, points, clamp_dist=0.1, MAX_POINTS=100000
     return sdf
 
 def decode_sdf_gradient(decoder, latent_vector, points, clamp_dist=0.1, MAX_POINTS=100000, no_grad=False):
+    """
+    This is to get the sdf gradient with merely the torch create_graph and retain_graph functionality.
+    
+    If any change is being made, you only need to modify 'decode_sdf' above.
+    """
     print(f'[In decode_sdf_gradient] Entering...')
     start, num_all = 0, points.shape[0]
     output_list = []

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-from core.utils.decoder_utils_plaintest import decode_sdf, decode_sdf_gradient
+from core.utils.decoder_utils import decode_sdf, decode_sdf_gradient
 from core.visualize.profiler import Profiler
 from core.utils.render_utils import depth2normal
 import copy
@@ -465,4 +465,5 @@ class SDFRenderer(object):
         
 if __name__ == '__main__':
     pass
+
 

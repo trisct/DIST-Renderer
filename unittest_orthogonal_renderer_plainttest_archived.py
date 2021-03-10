@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 import torch
 import numpy as np
-from core.sdfrenderer.renderer_orthogonal import SDFRenderer
+from core_orthogonal_archived.sdfrenderer.renderer_orthogonal import SDFRenderer
 
 
 def load_decoder(checkpoint_path=None, parallel=True):

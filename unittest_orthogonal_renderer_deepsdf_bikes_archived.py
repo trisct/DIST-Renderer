@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 import torch
 import numpy as np
-from core.sdfrenderer.renderer_orthogonal import SDFRenderer
+from core_orthogonal_archived.sdfrenderer.renderer_orthogonal import SDFRenderer
 
 
 def load_decoder(checkpoint_path=None, parallel=True):
@@ -39,7 +39,7 @@ decoder = load_decoder('trained_models/99000.pth')
 decoder = decoder.module.cuda()
 
 
-hw = (256, 300)
+hw = (256, 256)
 renderer = SDFRenderer(decoder, img_hw=hw)
 
 latent_codes = torch.load('trained_models/lcode/99000.pth')['latent_codes']['weight'].cuda()
@@ -73,8 +73,7 @@ masked_2[ ~res_reshaped[1] ] = 0.
 plt.imshow(masked_2)
 plt.savefig('min_sdf_sample_new_masked.png')
 
-normal_valid_mask = torch.ones_like(res[0], device=res[0].device).bool()
-res_normal = renderer.render_normal(latent_codes[0], res[0], normal_valid_mask, normalize=False)
+res_normal = renderer.render_normal(latent_codes[0], res[0], res[1])
 normal_map = res_normal.reshape(3, hw[0], hw[1]).detach().cpu().permute(1,2,0)
 
 plt.imshow(normal_map)
@@ -84,5 +83,3 @@ normal_masked = normal_map.clone()
 normal_masked[ ~torch.tensor(res_reshaped[1].reshape(hw[0], hw[1], 1)).bool().expand(hw[0], hw[1], 3) ] = 0.
 plt.imshow(normal_masked)
 plt.savefig('normal_masked.png')
-
-matplotlib.use('GTK3Agg')
