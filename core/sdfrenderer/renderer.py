@@ -845,11 +845,13 @@ class SDFRenderer(object):
     def render_depth(self, latent, R, T, clamp_dist=0.1, sample_index_type='min_abs', profile=False, no_grad=False, no_grad_depth=False, no_grad_mask=False, no_grad_camera=False, ray_marching_type='recursive', use_transform=True):
         if no_grad:
             no_grad_depth, no_grad_mask, no_grad_camera = True, True, True
+        
+        # Getting camera pos and rays
         print(f'Getting camera pos and rays')
         cam_pos = self.get_camera_location(R, T)
         cam_rays = self.get_camera_rays(R)
         dist = self.get_distance_from_origin(cam_pos, cam_rays)
-        print(f'| cam_pos = {cam_pos.shape}')
+        print(f'| cam_pos = {cam_pos.shape}, {cam_pos}')
         print(f'| cam_rays = {cam_rays.shape}, ray viewing direction. For our orthogonal case, we only need a single direction!')
         dbgtmpvar_camraylen = (cam_rays**2).sum(0)
         print(f'| cam_rays lengths: min = {dbgtmpvar_camraylen.min()}, max = {dbgtmpvar_camraylen.max()}, so these are unit vectors.')

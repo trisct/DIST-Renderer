@@ -74,6 +74,7 @@ def decode_sdf(decoder, latent_vector, points, clamp_dist=0.1, MAX_POINTS=100000
     return sdf
 
 def decode_sdf_gradient(decoder, latent_vector, points, clamp_dist=0.1, MAX_POINTS=100000, no_grad=False):
+    print(f'[In decode_sdf_gradient] Entering...')
     start, num_all = 0, points.shape[0]
     output_list = []
     while True:
@@ -81,8 +82,15 @@ def decode_sdf_gradient(decoder, latent_vector, points, clamp_dist=0.1, MAX_POIN
         points_batch = points[start:end]
         sdf = decode_sdf(decoder, latent_vector, points_batch, clamp_dist=clamp_dist)
         start = end
-        grad_tensor = torch.autograd.grad(outputs=sdf, inputs=points_batch, grad_outputs=torch.ones_like(points_batch), create_graph=True, retain_graph=True)
+
+        print(f'[In decode_sdf_gradient] In loop. sdf.shape = {sdf.shape}')
+        print(f'[In decode_sdf_gradient] In loop, points_batch.shape = {points_batch.shape}')
+        
+        
+        grad_tensor = torch.autograd.grad(outputs=sdf, inputs=points_batch, grad_outputs=torch.ones_like(sdf), create_graph=True, retain_graph=True) # A tuple of length 1
         grad_tensor = grad_tensor[0]
+        print(f'[In decode_sdf_gradient] In loop, grad_tensor.shape = {grad_tensor.shape}')
+
         if no_grad:
             grad_tensor = grad_tensor.detach()
         output_list.append(grad_tensor)

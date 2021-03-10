@@ -20,7 +20,7 @@ def load_decoder(checkpoint_path=None, parallel=True):
         "norm_layers" : [0, 1, 2, 3, 4, 5, 6, 7],
         "latent_in" : [4],
         "xyz_in_all" : False,
-        "use_tanh" : True,
+        "use_tanh" : False,
         "latent_dropout" : False,
         "weight_norm" : True
     })
