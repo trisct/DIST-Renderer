@@ -136,3 +136,14 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# data
+*.png
+*.tar.gz
+*.zip
+
+# model and result folders
+trained_models/
+data/
+vis/
+deepsdf/experiments/

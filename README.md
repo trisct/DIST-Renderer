@@ -77,7 +77,7 @@ This demo uses the same data as single-view inverse optimization over shape code
 ```
 python run_single_camera.py --visualize
 ```
-This script should create a folder `vis/demo_singleview_camera` where the output meshes and visualiations are stored. Generally the right camera extrinsic parameters can be acquired after optimization. However, sometimes it takes longer iteration when initialization is far away from the target.
+This script should create a folder `vis/demo_singleview_camera` where the output meshes and visualizations are stored. Generally the right camera extrinsic parameters can be acquired after optimization. However, sometimes it takes longer iteration when initialization is far away from the target.
 
 ### Multi-view 3D reconstruction on synthetic data
 Run the script to get the data for demo on multi-view synthetic data:

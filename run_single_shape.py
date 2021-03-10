@@ -23,8 +23,8 @@ def init_info():
     basedir = os.path.join(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.path.join(basedir, 'data')
     model_dir = os.path.join(basedir, 'deepsdf')
-    experiment_directory = os.path.join(model_dir, 'experiments/sofas')
-    split_file = os.path.join(model_dir, 'examples/splits/sv2_sofas_test.json')
+    experiment_directory = os.path.join(model_dir, 'experiments/20210307_zxc')
+    split_file = os.path.join(model_dir, 'examples/splits/20210307_zxc.json')
     synthetic_data_dir = os.path.join(data_dir, 'demo_singleview_syn')
     return mesh_data_dir, experiment_directory, split_file, synthetic_data_dir
 

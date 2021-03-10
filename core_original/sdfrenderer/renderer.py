@@ -12,8 +12,7 @@ import time
 class SDFRenderer(object):
     def __init__(self, decoder, intrinsic, img_hw=None, transform_matrix=None, march_step=50, buffer_size=5, ray_marching_ratio=1.5, use_depth2normal=False, max_sample_dist=0.2, radius=1.0, threshold=5e-5, scale_list=[4, 2, 1], march_step_list=[3, 3, -1], use_gpu=True, is_eval=True):
         self.decoder = decoder
-        print(f'[In renderer] Setting device to {next(self.decoder.parameters()).device}')
-        self.device = next(self.decoder.parameters()).device
+        self.device = next(self.decoder.parameters()).get_device()
         if is_eval:
             self.decoder.eval()
         self.march_step = march_step
@@ -30,16 +29,13 @@ class SDFRenderer(object):
         self.intrinsic = intrinsic
 
         if img_hw is None:
-            img_h, img_w = int(intrinsic[1,2] * 2), int(intrinsic[0,2] * 2) # this tells us that intrinsic matrix is 2-dimensional and [1,2], [0,2] are respectively cy, cx
+            img_h, img_w = int(intrinsic[1,2] * 2), int(intrinsic[0,2] * 2)
             self.img_hw = (img_h, img_w)
         else:
             self.img_hw = img_hw
 
         self.homo_2d = self.init_grid_homo_2d(self.img_hw)
         self.K, self.K_inv = self.init_intrinsic(intrinsic)
-        print(f'[In renderer] showing candidate devices at line 40...')
-        print(f'[In renderer] | K_inv = {self.K_inv.device}')
-        print(f'[In renderer] | homo_2d = {self.homo_2d.device}')
         self.homo_calib = torch.matmul(self.K_inv, self.homo_2d) # (3, H*W)
         self.homo_calib.requires_grad=False
         self.imgmap_init = self.init_imgmap(self.img_hw)
@@ -135,7 +131,7 @@ class SDFRenderer(object):
         Y, X = torch.meshgrid(torch.arange(0, h), torch.arange(0, w))
         grid_map = torch.cat([X[:,:,None], Y[:,:,None]], 2) # (h, w, 2)
         grid_map = grid_map.float()
-        return grid_map.to(self.device)
+        return grid_map
 
     def get_homo_2d_from_xy(self, xy):
         '''
@@ -148,7 +144,7 @@ class SDFRenderer(object):
         H, W = xy.shape[0], xy.shape[1]
         homo_ones = torch.ones(H, W, 1)
         if xy.get_device() != -1:
-            homo_ones = homo_ones.to(xy.device)
+            homo_ones = homo_ones.to(xy.get_device())
         homo_2d = torch.cat([xy, homo_ones], 2)
         return homo_2d
 
@@ -163,8 +159,8 @@ class SDFRenderer(object):
         return homo_2d
 
     def init_intrinsic(self, intrinsic):
-        K = torch.from_numpy(intrinsic).float().to(self.device)
-        K_inv = torch.from_numpy(np.linalg.inv(intrinsic)).float().to(self.device)
+        K = torch.from_numpy(intrinsic).float()
+        K_inv = torch.from_numpy(np.linalg.inv(intrinsic)).float()
         return K, K_inv
 
     def init_imgmap(self, img_hw):
@@ -331,7 +327,7 @@ class SDFRenderer(object):
         elif index_type == 'last_valid':
             march_step, N = sdf_list.shape[0], sdf_list.shape[1]
             valid = (torch.abs(sdf_list) < clamp_dist)
-            idx_list = torch.arange(0, march_step)[:,None].repeat(1,N).to(sdf_list.device)
+            idx_list = torch.arange(0, march_step)[:,None].repeat(1,N).to(sdf_list.get_device())
             idx_list = idx_list.float() * valid.float()
             _, index = torch.topk(idx_list.transpose(1,0), index_size, dim=1) # (N, index_size)
             sdf = self.collect_data_from_index(sdf_list, index)[0].transpose(1,0)
@@ -339,7 +335,7 @@ class SDFRenderer(object):
             march_step, N = sdf_list.shape[0], sdf_list.shape[1]
             sdf = sdf_list[-index_size:, :].transpose(1,0)
             index = torch.arange(march_step - index_size, march_step)[None,:].repeat(N, 1)
-            index = index.to(sdf.device)
+            index = index.to(sdf.get_device())
         else:
             raise NotImplementedError
         return sdf, index
@@ -353,7 +349,7 @@ class SDFRenderer(object):
         - data_sampled:	type: torch.Tensor (index_size, N) / (index_size, N, k)
         '''
         index_size = index.shape[1]
-        count_index = torch.arange(index.shape[0]).repeat(index_size).to(index.device)
+        count_index = torch.arange(index.shape[0]).repeat(index_size).to(index.get_device())
         point_index = index.transpose(1,0).reshape(-1) * data.shape[1] + count_index
 
         if len(data.shape) == 3:
@@ -378,7 +374,7 @@ class SDFRenderer(object):
         N = points.shape[0]
         points = points[None,:,:].repeat(num_samples, 1, 1) # (num_samples, N, 3)
         cam_rays = cam_rays.transpose(1, 0)[None,:,:].repeat(num_samples, 1, 1) # (num_samples, N, 3)
-        delta_depth = torch.linspace(0, -self.max_sample_dist, num_samples).to(points.device) # (num_samples)
+        delta_depth = torch.linspace(0, -self.max_sample_dist, num_samples).to(points.get_device()) # (num_samples)
         delta_depth = delta_depth[:,None,None].repeat(1, N, 3) # (num_samples, N, 3)
         points_sampled = delta_depth * cam_rays + points # (num_smaples, N, 3)
         return points_sampled
@@ -618,18 +614,14 @@ class SDFRenderer(object):
         new_h, new_w = np.ceil(h / scale), np.ceil(w / scale)
 
         new_grid_map = self.get_meshgrid((new_h, new_w))
-        print(f'[In renderer] showing candidate devices at line 618...')
-        #print(f'[In renderer] | scale = {scale.device}')
-        print(f'[In renderer] | stride = {stride.device}')
-        print(f'[In renderer] | new_grid_map = {new_grid_map.device}')
         new_grid_map = (scale * stride) * new_grid_map + ((scale * stride) - 1) / 2
-        new_grid_map = new_grid_map.to(grid_map.device)
+        new_grid_map = new_grid_map.to(grid_map.get_device())
 
         if stride == 1:
             grid_map_meshgrid = grid_map
         else:
             grid_map_meshgrid = self.get_meshgrid((h,w))
-            grid_map_meshgrid = grid_map_meshgrid.to(grid_map.device)
+            grid_map_meshgrid = grid_map_meshgrid.to(grid_map.get_device())
         index_map = torch.ceil((grid_map_meshgrid + 1) / scale) - 1
 
         if (index_map[:,:,0] + index_map[:,:,1] * new_grid_map.shape[1]).max().detach().cpu().numpy() > new_grid_map.reshape(-1,2).shape[0]:
@@ -683,10 +675,9 @@ class SDFRenderer(object):
         - new_valid_mask:	type: torch.Tensor (H'*W')
         '''
         from torch_scatter import scatter_max
-        print(f'[In renderer.maxpool_valid_mask_with_index] valid_mask: {valid_mask.dtype}, index_map: {index_map.dtype}')
         with torch.no_grad():
-            new_valid_mask, _ = scatter_max(valid_mask.int(), index_map)
-        return new_valid_mask.bool()
+            new_valid_mask, _ = scatter_max(valid_mask, index_map)
+        return new_valid_mask
 
     def upsample_zdepth_and_recalib(self, zdepth_lowres, index_map, recalib_map):
         zdepth_highres = zdepth_lowres[:, index_map]
@@ -706,16 +697,16 @@ class SDFRenderer(object):
 
         if len(tensor.shape) == 2:
             if fill_value == 0:
-                output = torch.zeros(C, N_new).to(tensor.device)
+                output = torch.zeros(C, N_new).to(tensor.get_device())
             else:
-                output = (torch.ones(C, N_new) * fill_value).to(tensor.device)
+                output = (torch.ones(C, N_new) * fill_value).to(tensor.get_device())
             output[:, valid_mask] = tensor
         else:
             M = tensor.shape[2]
             if fill_value == 0:
-                output = torch.zeros(C, N_new, M).to(tensor.device)
+                output = torch.zeros(C, N_new, M).to(tensor.get_device())
             else:
-                output = (torch.ones(C, N_new, M) * fill_value).to(tensor.device)
+                output = (torch.ones(C, N_new, M) * fill_value).to(tensor.get_device())
             output[:, valid_mask, :] = tensor
         return output
 
@@ -845,33 +836,19 @@ class SDFRenderer(object):
     def render_depth(self, latent, R, T, clamp_dist=0.1, sample_index_type='min_abs', profile=False, no_grad=False, no_grad_depth=False, no_grad_mask=False, no_grad_camera=False, ray_marching_type='recursive', use_transform=True):
         if no_grad:
             no_grad_depth, no_grad_mask, no_grad_camera = True, True, True
-        print(f'Getting camera pos and rays')
+
         cam_pos = self.get_camera_location(R, T)
         cam_rays = self.get_camera_rays(R)
         dist = self.get_distance_from_origin(cam_pos, cam_rays)
-        print(f'| cam_pos = {cam_pos.shape}')
-        print(f'| cam_rays = {cam_rays.shape}, ray viewing direction. For our orthogonal case, we only need a single direction!')
-        dbgtmpvar_camraylen = (cam_rays**2).sum(0)
-        print(f'| cam_rays lengths: min = {dbgtmpvar_camraylen.min()}, max = {dbgtmpvar_camraylen.max()}, so these are unit vectors.')
-        print(f'| dist = {dist.shape}')
-
 
         profiler = Profiler(silent = not profile)
         # initialization on the unit sphere
         h, w = self.img_hw
-        print(f'Getting initial zdepth and valid mask')
         init_zdepth, valid_mask = self.get_intersections_with_unit_spheres(cam_pos, cam_rays)
-        print(f'| init_zdepth = {init_zdepth.shape}')
-        print(f'| valid_mask = {valid_mask.shape}')
         profiler.report_process('[DEPTH] initialization time')
 
         # ray marching
-        print(f'Marching rays. Clearly the most important marching step happens here.')
         sdf_list, marching_zdepth_list, points_list, valid_mask_render = self.ray_marching(cam_pos, R, init_zdepth, valid_mask, latent, clamp_dist=clamp_dist, no_grad=no_grad_camera, ray_marching_type=ray_marching_type, use_transform=use_transform)
-        print(f'| sdf_list = {sdf_list.shape}, the sdfs at all 50 marching steps')
-        print(f'| marching_zdepth_list = {marching_zdepth_list.shape}, the depth at all 50 marching steps')
-        print(f'| points_list = {points_list.shape}, the points at all 50 marching steps')
-        print(f'| valid_mask_render = {valid_mask_render.shape}, only a single image')
         profiler.report_process('[DEPTH] ray marching time')
 
         # get differnetiable samples
@@ -953,7 +930,7 @@ class SDFRenderer(object):
 
         grid_list = 0.5 * clamp_dist * (torch.arange(num_forward_sampling).float() + 1) / num_forward_sampling
         if cam_pos.get_device() != -1:
-            grid_list.to(cam_pos.device)
+            grid_list.to(cam_pos.get_device())
         inside_samples_list = []
         for idx in range(num_forward_sampling):
             grid = grid_list[idx]
