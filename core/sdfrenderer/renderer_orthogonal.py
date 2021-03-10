@@ -4,8 +4,7 @@ import torch.nn as nn
 import numpy as np
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 from core.utils.decoder_utils_plaintest import decode_sdf, decode_sdf_gradient
-from core.visualize.profiler import Profiler
-from core.utils.render_utils import depth2normal
+#from core.utils.render_utils import depth2normal # currently not used
 import copy
 import time
 import matplotlib.pyplot as plt
@@ -13,10 +12,9 @@ import matplotlib.pyplot as plt
 class SDFRenderer(object):
     def __init__(self, decoder, img_hw=None, march_step=50, buffer_size=5, ray_marching_ratio=1.5, max_sample_dist=0.2, radius=1.0, threshold=5e-5, use_gpu=True, is_eval=True):
         self.decoder = decoder
-        print(f'[In renderer] Setting device to {next(self.decoder.parameters()).device}')
-        self.device = next(self.decoder.parameters()).device
-        if is_eval:
-            self.decoder.eval()
+        self.device = torch.device('cuda')
+        #if is_eval:
+        #    self.decoder.eval()
         self.march_step = march_step
         self.buffer_size = buffer_size
         self.max_sample_dist = max_sample_dist
@@ -211,19 +209,15 @@ class SDFRenderer(object):
         return points_sampled
 
     def get_min_sdf_sample(self, sdf_list, points_list, latent, index_type='min_abs', clamp_dist=0.1, profile=False, no_grad=False):
-        profiler = Profiler(silent = not profile)
         _, index = self.get_index_from_sdf_list(sdf_list, 1, index_type=index_type)
         points = self.collect_data_from_index(points_list, index)[0] # (N, 3)
         min_sdf_sample = decode_sdf(self.decoder, latent, points, clamp_dist=None, no_grad=no_grad).squeeze(-1)
-        profiler.report_process('[DEPTH] [SAMPLING] sample min sdf time\t')
         if no_grad:
             min_sdf_sample = min_sdf_sample.detach()
         return min_sdf_sample
 
     def get_sample_on_marching_zdepth_along_ray(self, marching_zdepth_list, sdf_list, points_list, cam_rays, latent, index_type='min_abs', use_uniform_sample=False, clamp_dist=0.1, profile=False, no_grad=False):
-        # initialization
-        profiler = Profiler(silent = not profile)
-
+        
         # collect points
         if use_uniform_sample:
             sdf_selected, index_selected = self.get_index_from_sdf_list(sdf_list, 1, index_type=index_type, clamp_dist=clamp_dist)
@@ -232,8 +226,7 @@ class SDFRenderer(object):
         else:
             sdf_selected, index_selected = self.get_index_from_sdf_list(sdf_list, self.buffer_size, index_type=index_type, clamp_dist=clamp_dist)
             points_sampled = self.collect_data_from_index(points_list, index_selected)
-        profiler.report_process('[DEPTH] [SAMPLING] collect points time\t')
-
+        
         # generate new marching zdepth
         marching_zdepth = self.collect_data_from_index(marching_zdepth_list, index_selected[:,[0]])[0] # (N)
         marching_zdepth = marching_zdepth + (1 - self.ray_marching_ratio) * torch.clamp(sdf_selected[0,:], -clamp_dist, clamp_dist) # (N)
@@ -246,7 +239,6 @@ class SDFRenderer(object):
                 sdf = decode_sdf(self.decoder, latent, points_sampled[i], clamp_dist=clamp_dist, no_grad=no_grad).squeeze(-1)
                 marching_zdepth_new = marching_zdepth_new - sdf.detach() * self.ray_marching_ratio
                 marching_zdepth_new = marching_zdepth_new + sdf * self.ray_marching_ratio
-            profiler.report_process('[DEPTH] [SAMPLING] re-ray marching time')
             marching_zdepth_final = marching_zdepth_new
         return marching_zdepth_final
 
@@ -383,7 +375,6 @@ class SDFRenderer(object):
         print(f'| dist = {dist.shape}')
 
 
-        profiler = Profiler(silent = not profile)
         # initialization on the unit sphere
         h, w = self.img_hw
         print(f'Getting initial zdepth and valid mask')
@@ -392,8 +383,7 @@ class SDFRenderer(object):
         #init_zdepth, valid_mask = self.get_intersections_with_unit_spheres(cam_pos, cam_rays)
         print(f'[In render_depth] init_zdepth = {init_zdepth.shape}')
         print(f'| valid_mask = {valid_mask.shape}')
-        profiler.report_process('[DEPTH] initialization time')
-
+        
         # ray marching
         print(f'Marching rays. Clearly the most important marching step happens here.')
         sdf_list, marching_zdepth_list, points_list, valid_mask_render = self.ray_marching(cam_pos, init_zdepth, valid_mask, latent, clamp_dist=clamp_dist, no_grad=no_grad_camera, ray_marching_type=ray_marching_type)
@@ -401,13 +391,11 @@ class SDFRenderer(object):
         print(f'| marching_zdepth_list = {marching_zdepth_list.shape}, the depth at all 50 marching steps')
         print(f'| points_list = {points_list.shape}, the points at all 50 marching steps')
         print(f'| valid_mask_render = {valid_mask_render.shape}, only a single image')
-        profiler.report_process('[DEPTH] ray marching time')
-
+        
         # get differnetiable samples
         min_sdf_sample = self.get_min_sdf_sample(sdf_list, points_list, latent, index_type='min_abs', clamp_dist=clamp_dist, profile=profile, no_grad=no_grad_mask)
         marching_zdepth = self.get_sample_on_marching_zdepth_along_ray(marching_zdepth_list, sdf_list, points_list, cam_rays[:, valid_mask], latent, use_uniform_sample=False, index_type=sample_index_type, clamp_dist=clamp_dist, profile=profile, no_grad=no_grad_depth)
-        profiler.report_process('[DEPTH] re-sampling time')
-
+        
         # generate output
         min_sdf_sample_new = torch.zeros_like(valid_mask).float() # (H, W)
         min_sdf_sample_new.requires_grad = True
@@ -424,7 +412,6 @@ class SDFRenderer(object):
         ## update valid_mask
         valid_mask = valid_mask.clone()
         valid_mask[valid_mask] = valid_mask_render
-        profiler.report_process('[DEPTH] finalize time\t')
         if no_grad_depth:
             Zdepth = Zdepth.detach()
         return Zdepth, valid_mask, min_sdf_sample_new # (H*W), (H*W), (H*W)
