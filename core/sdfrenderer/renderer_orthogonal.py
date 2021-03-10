@@ -2,8 +2,7 @@ import os, sys
 import torch
 import torch.nn as nn
 import numpy as np
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-from core.utils.decoder_utils_plaintest import decode_sdf, decode_sdf_gradient
+from core.sdfrender.decoder_utils_plaintest import decode_sdf, decode_sdf_gradient
 #from core.utils.render_utils import depth2normal # currently not used
 import copy
 import time
@@ -12,7 +11,7 @@ import matplotlib.pyplot as plt
 class SDFRenderer(object):
     def __init__(self, decoder, img_hw=None, march_step=50, buffer_size=5, ray_marching_ratio=1.5, max_sample_dist=0.2, radius=1.0, threshold=5e-5, use_gpu=True, is_eval=True):
         self.decoder = decoder
-        self.device = torch.device('cuda')
+        self.device = decoder.device
         #if is_eval:
         #    self.decoder.eval()
         self.march_step = march_step
@@ -208,15 +207,15 @@ class SDFRenderer(object):
         points_sampled = delta_depth * cam_rays + points # (num_smaples, N, 3)
         return points_sampled
 
-    def get_min_sdf_sample(self, sdf_list, points_list, latent, index_type='min_abs', clamp_dist=0.1, profile=False, no_grad=False):
+    def get_min_sdf_sample(self, sdf_list, points_list, features, index_type='min_abs', clamp_dist=0.1, profile=False, no_grad=False):
         _, index = self.get_index_from_sdf_list(sdf_list, 1, index_type=index_type)
         points = self.collect_data_from_index(points_list, index)[0] # (N, 3)
-        min_sdf_sample = decode_sdf(self.decoder, latent, points, clamp_dist=None, no_grad=no_grad).squeeze(-1)
+        min_sdf_sample = decode_sdf(self.decoder, features, points, clamp_dist=None, no_grad=no_grad).squeeze(-1)
         if no_grad:
             min_sdf_sample = min_sdf_sample.detach()
         return min_sdf_sample
 
-    def get_sample_on_marching_zdepth_along_ray(self, marching_zdepth_list, sdf_list, points_list, cam_rays, latent, index_type='min_abs', use_uniform_sample=False, clamp_dist=0.1, profile=False, no_grad=False):
+    def get_sample_on_marching_zdepth_along_ray(self, marching_zdepth_list, sdf_list, points_list, cam_rays, features, index_type='min_abs', use_uniform_sample=False, clamp_dist=0.1, profile=False, no_grad=False):
         
         # collect points
         if use_uniform_sample:
@@ -236,14 +235,14 @@ class SDFRenderer(object):
         else:
             marching_zdepth_new = marching_zdepth
             for i in range(self.buffer_size):
-                sdf = decode_sdf(self.decoder, latent, points_sampled[i], clamp_dist=clamp_dist, no_grad=no_grad).squeeze(-1)
+                sdf = decode_sdf(self.decoder, features, points_sampled[i], clamp_dist=clamp_dist, no_grad=no_grad).squeeze(-1)
                 marching_zdepth_new = marching_zdepth_new - sdf.detach() * self.ray_marching_ratio
                 marching_zdepth_new = marching_zdepth_new + sdf * self.ray_marching_ratio
             marching_zdepth_final = marching_zdepth_new
         return marching_zdepth_final
 
 
-    def ray_marching_recursive(self, cam_pos, cam_rays, init_zdepth, valid_mask, latent, march_step=None, stop_threshold=None, clamp_dist=0.1, no_grad=False, use_first_query_check=True):
+    def ray_marching_recursive(self, cam_pos, cam_rays, init_zdepth, valid_mask, features, march_step=None, stop_threshold=None, clamp_dist=0.1, no_grad=False, use_first_query_check=True):
         print(f'[In ray_marching_recursive]')
         print(f'| | cam_rays = {cam_rays}')
         if stop_threshold is None:
@@ -290,7 +289,7 @@ class SDFRenderer(object):
             points_now = self.generate_point_samples(cam_pos_now, cam_rays_now, init_zdepth_now + marching_zdepth_now) # (3, K)
             if no_grad:
                 points_now = points_now.detach()
-            sdf_now = decode_sdf(self.decoder, latent, points_now.transpose(1,0), clamp_dist=None, no_grad=no_grad).squeeze(-1) # (K)
+            sdf_now = decode_sdf(self.decoder, features, points_now.transpose(1,0), clamp_dist=None, no_grad=no_grad).squeeze(-1) # (K)
             points = torch.zeros_like(marching_zdepth)[:,None].repeat(1,3)
             points[unfinished_mask,:] = points_now.transpose(1,0)
             if no_grad:
@@ -338,7 +337,7 @@ class SDFRenderer(object):
         return sdf_list, marching_zdepth_list, points_list, valid_mask_render
 
 
-    def ray_marching(self, cam_pos, init_zdepth, valid_mask, latent, march_step=None, clamp_dist=0.1, no_grad=False, ray_marching_type='recursive', split_type='raydepth'):
+    def ray_marching(self, cam_pos, init_zdepth, valid_mask, features, march_step=None, clamp_dist=0.1, no_grad=False, ray_marching_type='recursive', split_type='raydepth'):
         '''
         ray marching function
         Input:
@@ -355,11 +354,11 @@ class SDFRenderer(object):
             raise NotImplementedError
         elif ray_marching_type == 'recursive':
             _, cam_rays, _, _ = self.get_grid_and_rays()
-            return self.ray_marching_recursive(cam_pos, cam_rays, init_zdepth, valid_mask, latent, march_step=None, clamp_dist=clamp_dist, no_grad=no_grad)
+            return self.ray_marching_recursive(cam_pos, cam_rays, init_zdepth, valid_mask, features, march_step=None, clamp_dist=clamp_dist, no_grad=no_grad)
         else:
             raise ValueError('Error! Invalid type of ray marching: {}.'.format(ray_marching_type))
 
-    def render_depth(self, latent, clamp_dist=0.1, sample_index_type='min_abs', profile=False, no_grad=False, no_grad_depth=False, no_grad_mask=False, no_grad_camera=False, ray_marching_type='recursive'):
+    def render_depth(self, features, clamp_dist=0.1, sample_index_type='min_abs', profile=False, no_grad=False, no_grad_depth=False, no_grad_mask=False, no_grad_camera=False, ray_marching_type='recursive'):
         if no_grad:
             no_grad_depth, no_grad_mask, no_grad_camera = True, True, True
         
@@ -386,15 +385,15 @@ class SDFRenderer(object):
         
         # ray marching
         print(f'Marching rays. Clearly the most important marching step happens here.')
-        sdf_list, marching_zdepth_list, points_list, valid_mask_render = self.ray_marching(cam_pos, init_zdepth, valid_mask, latent, clamp_dist=clamp_dist, no_grad=no_grad_camera, ray_marching_type=ray_marching_type)
+        sdf_list, marching_zdepth_list, points_list, valid_mask_render = self.ray_marching(cam_pos, init_zdepth, valid_mask, features, clamp_dist=clamp_dist, no_grad=no_grad_camera, ray_marching_type=ray_marching_type)
         print(f'| sdf_list = {sdf_list.shape}, the sdfs at all 50 marching steps')
         print(f'| marching_zdepth_list = {marching_zdepth_list.shape}, the depth at all 50 marching steps')
         print(f'| points_list = {points_list.shape}, the points at all 50 marching steps')
         print(f'| valid_mask_render = {valid_mask_render.shape}, only a single image')
         
         # get differnetiable samples
-        min_sdf_sample = self.get_min_sdf_sample(sdf_list, points_list, latent, index_type='min_abs', clamp_dist=clamp_dist, profile=profile, no_grad=no_grad_mask)
-        marching_zdepth = self.get_sample_on_marching_zdepth_along_ray(marching_zdepth_list, sdf_list, points_list, cam_rays[:, valid_mask], latent, use_uniform_sample=False, index_type=sample_index_type, clamp_dist=clamp_dist, profile=profile, no_grad=no_grad_depth)
+        min_sdf_sample = self.get_min_sdf_sample(sdf_list, points_list, features, index_type='min_abs', clamp_dist=clamp_dist, profile=profile, no_grad=no_grad_mask)
+        marching_zdepth = self.get_sample_on_marching_zdepth_along_ray(marching_zdepth_list, sdf_list, points_list, cam_rays[:, valid_mask], features, use_uniform_sample=False, index_type=sample_index_type, clamp_dist=clamp_dist, profile=profile, no_grad=no_grad_depth)
         
         # generate output
         min_sdf_sample_new = torch.zeros_like(valid_mask).float() # (H, W)
@@ -416,7 +415,7 @@ class SDFRenderer(object):
             Zdepth = Zdepth.detach()
         return Zdepth, valid_mask, min_sdf_sample_new # (H*W), (H*W), (H*W)
 
-    def render_normal(self, latent, Zdepth, valid_mask, clamp_dist=0.1, MAX_POINTS=100000, no_grad=False, normalize=True):
+    def render_normal(self, features, Zdepth, valid_mask, clamp_dist=0.1, MAX_POINTS=100000, no_grad=False, normalize=True):
         
         cam_pos, cam_rays, init_zdepth, _ = self.get_grid_and_rays()
 
@@ -434,7 +433,7 @@ class SDFRenderer(object):
 
         # compute normal
         points = self.generate_point_samples(valid_cam_pos, valid_cam_rays, valid_zdepth, has_zdepth_grad=False)
-        gradient = decode_sdf_gradient(self.decoder, latent, points.transpose(1,0), clamp_dist=clamp_dist, no_grad=no_grad, MAX_POINTS=MAX_POINTS) # (N, 3)
+        gradient = decode_sdf_gradient(self.decoder, features, points.transpose(1,0), clamp_dist=clamp_dist, no_grad=no_grad, MAX_POINTS=MAX_POINTS) # (N, 3)
         gradient = gradient.transpose(1,0) # (3, N)
         if normalize:
             valid_normal = self.normalize_vectors(gradient) # (3, N)

@@ -14,9 +14,7 @@ latent_codes = None
 hw = (256, 300)
 renderer = SDFRenderer(decoder, img_hw=hw)
 
-latent_codes = torch.load('trained_models/lcode/99000.pth')['latent_codes']['weight'].cuda()
-
-res = renderer.render_depth(latent_codes[0])
+res = renderer.render_depth(latent_codes)
 res_reshaped = []
 
 for r in res:
@@ -46,7 +44,7 @@ plt.imshow(masked_2)
 plt.savefig('min_sdf_sample_new_masked.png')
 
 normal_valid_mask = torch.ones_like(res[0], device=res[0].device).bool()
-res_normal = renderer.render_normal(latent_codes[0], res[0], normal_valid_mask, normalize=False)
+res_normal = renderer.render_normal(latent_codes, res[0], normal_valid_mask, normalize=False)
 normal_map = res_normal.reshape(3, hw[0], hw[1]).detach().cpu().permute(1,2,0)
 
 plt.imshow(normal_map)
